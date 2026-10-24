@@ -3177,6 +3177,7 @@ class SampleGRPOTrainer(GRPOTrainer):
                 is_rh = list(is_rh) + [False] * (n_samples - n_det_samples)
 
             is_rh_tensor = torch.tensor(is_rh, dtype=torch.bool, device=device)
+            self._last_is_rh = is_rh_tensor  # graft-monitors: flags for every arm (RP too), read by rollout_logger
 
             # --- Idea 2: EMA-driven forget-scale clamp ---
             # Update an EMA of the routing-slice hack rate (only over hackable
