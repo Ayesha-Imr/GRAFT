@@ -29,6 +29,25 @@ def _num(x):
     return None if math.isnan(x) else x
 
 
+def _config_hash(trainer) -> str:
+    """sha256 of run_config.yaml plus the frozen monitor config it points at (if any)."""
+    import hashlib
+    import yaml
+    h = hashlib.sha256()
+    rc = os.path.join(trainer.args.output_dir, "run_config.yaml")
+    if os.path.exists(rc):
+        text = open(rc, "rb").read()
+        h.update(text)
+        try:
+            det = (yaml.safe_load(text) or {}).get("rh_detector") or {}
+            mon = (det.get("params") or {}).get("config_path")
+            if mon and os.path.exists(mon):
+                h.update(open(mon, "rb").read())
+        except Exception:
+            pass
+    return h.hexdigest()[:16]
+
+
 def log_rollouts(trainer, output, inputs):
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -96,11 +115,18 @@ def log_rollouts(trainer, output, inputs):
         "run_id", "arm", "seed", "config_hash", "step", "row", "env", "prompt_id", "nums", "target",
         "hackable", "completion", "completion_tokens", "raw_reward", "advantage", "proxy_reward",
         "true_reward", "true_tested", "hack", "hack_type_repo", "forget_reward", "anchor_reward",
-        "monitor_score", "monitor_tau", "flagged", "routed", "is_coherence", "sampling_adapters")}
+        "monitor_score", "monitor_tau", "flagged", "routed", "is_coherence", "sampling_adapters",
+        "t_rollout_s", "t_monitor_s", "wall_time")}
     run_id = os.environ.get("GRAFT_RUN_ID", os.path.basename(trainer.args.output_dir.rstrip("/")))
     arm = os.environ.get("GRAFT_ARM", "")
     seed = int(os.environ.get("GRAFT_SEED", trainer.args.seed))
-    chash = os.environ.get("GRAFT_CONFIG_HASH", "")
+    if not hasattr(trainer, "_gm_config_hash"):
+        trainer._gm_config_hash = os.environ.get("GRAFT_CONFIG_HASH") or _config_hash(trainer)
+    chash = trainer._gm_config_hash
+    arm = arm or run_id
+    t_rollout = float(getattr(trainer, "_last_rollout_time", float("nan")))
+    t_monitor = float(mon["seconds"]) if mon_scores is not None else 0.0
+    wall = time.time()
     for i in range(n):
         # Anchor rows: the cross-env tail (Countdown) or interlaced same-env coherence rows (toy).
         target_row = i < n_target and not bool(is_coh[i])
@@ -143,6 +169,9 @@ def log_rollouts(trainer, output, inputs):
         rows["routed"].append(bool(is_rh[i]) and target_row and gr)
         rows["is_coherence"].append(bool(is_coh[i]) or not target_row)
         rows["sampling_adapters"].append(("R+F" if target_row else "R") if gr else "full")
+        rows["t_rollout_s"].append(t_rollout)
+        rows["t_monitor_s"].append(t_monitor)
+        rows["wall_time"].append(wall)
     rh_detectors.LAST_MONITOR["scores"] = None  # consumed; never reused by a later step
     table = pa.table(rows)
     pq.write_table(table, os.path.join(out_dir, f"step_{step:05d}.parquet"), compression="zstd")
