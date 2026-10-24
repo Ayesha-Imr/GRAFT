@@ -3576,6 +3576,11 @@ class SampleGRPOTrainer(GRPOTrainer):
                 and self.accelerator.is_main_process):
             self._log_training_trace(output, inputs)
 
+        # graft-monitors: every rollout row to parquet (seed doc §7.1).
+        if os.environ.get("GRAFT_ROLLOUT_LOG_DIR") and self.accelerator.is_main_process:
+            from rollout_logger import log_rollouts
+            log_rollouts(self, output, inputs)
+
         # Capture batch for offline profiling (once only)
         if getattr(self, '_save_batch_path', None) and not getattr(self, '_batch_saved', False):
             cpu_output = {k: v.cpu() if isinstance(v, torch.Tensor) else v

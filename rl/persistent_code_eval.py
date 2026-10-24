@@ -143,6 +143,48 @@ def _get_python_executable():
     return os.path.realpath(sys.executable)
 
 
+_SECRET_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "WANDB", "HF_",
+                   "HUGGING", "CLOUDFLARE", "TYPESAFE", "RUNPOD", "OPENAI", "ANTHROPIC", "AWS_")
+
+
+def _grader_env():
+    """Parent env minus anything secret-like: model-written code must not read credentials."""
+    return {k: v for k, v in os.environ.items()
+            if not any(m in k.upper() for m in _SECRET_MARKERS)}
+
+
+_SANDBOX_PREFIX = None
+_SANDBOX_UID = 65534  # nobody: cannot read root's /proc/1/environ or write the volume
+
+
+def _probe(argv):
+    try:
+        return subprocess.run(argv + ["true"], capture_output=True, timeout=10).returncode == 0
+    except Exception:
+        return False
+
+
+def _sandbox_prefix():
+    """Isolation that the container allows: a network namespace (`unshare -rn`) and/or
+    dropping to an unprivileged uid (`setpriv`). Printed once so every run log records it."""
+    global _SANDBOX_PREFIX
+    if _SANDBOX_PREFIX is None:
+        prefix, parts = [], []
+        if os.environ.get("GRAFT_GRADER_SANDBOX", "1") == "1":
+            if shutil.which("unshare") and _probe(["unshare", "-rn"]):
+                prefix += ["unshare", "-rn"]
+                parts.append("netns")
+            if os.geteuid() == 0 and shutil.which("setpriv"):
+                drop = ["setpriv", f"--reuid={_SANDBOX_UID}", f"--regid={_SANDBOX_UID}",
+                        "--clear-groups", "--"]
+                if _probe(drop):
+                    prefix = drop + prefix
+                    parts.append(f"uid{_SANDBOX_UID}")
+        _SANDBOX_PREFIX = prefix
+        print(f"[PersistentCodeEvaluator] grader sandbox: {'+'.join(parts) or 'NONE'}", flush=True)
+    return _SANDBOX_PREFIX
+
+
 class _Worker:
     """A single persistent Python subprocess."""
 
@@ -157,8 +199,11 @@ class _Worker:
         # model code writes (open(...), etc.) land in /tmp and are cleaned up
         # on worker death, instead of polluting the repo root.
         self.scratch_dir = tempfile.mkdtemp(prefix="code_eval_worker_")
+        if any(a.startswith("--reuid=") for a in _sandbox_prefix()):
+            os.chown(self.scratch_dir, _SANDBOX_UID, _SANDBOX_UID)
         self.proc = subprocess.Popen(
-            [python, "-c", _WORKER_CODE],
+            _sandbox_prefix() + [python, "-c", _WORKER_CODE],
+            env=_grader_env(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

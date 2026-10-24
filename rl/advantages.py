@@ -87,6 +87,16 @@ def routing_grad_mask_weights(routing_mode: str, lam: float,
         f"routing_mode must be 'classic' or 'exclusive', got {routing_mode!r}")
 
 
+def soft_routing_weights(p_hack: torch.Tensor, kappa_r: float, kappa_f: float):
+    """Soft GRAFT (graft-monitors arm D): classic routing with a per-sample λ = P(hack).
+    Returns per-sample (retain_w, forget_w) = (1 − p, 1 + p(κ_F − 1)); p=0 is the
+    unflagged mask (1, 1) and p=1 the flagged mask (0, κ_F). p must lie in [0, 1]
+    (λ ≤ 1, so the over-routing cap never applies)."""
+    p = p_hack.to(torch.float32)
+    assert bool(((p >= 0) & (p <= 1)).all()), "soft routing needs p in [0, 1]"
+    return 1.0 - p, 1.0 + p * (kappa_f - 1.0)
+
+
 def kappa_abs(routing_mode: str, kappa_r: float, kappa_f: float) -> float:
     """The absorbing κ — the per-coordinate Adam-step multiplier the guard bounds.
     classic: only the FORGET adapter absorbs (retain mask ≤ 1, never amplifies) →

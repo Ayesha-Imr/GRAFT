@@ -1386,6 +1386,44 @@ def mbpp_twotest_second_freq(completions, prompts=None, plus_entry=None, **kwarg
     return _twotest_index_freq(completions, prompts, plus_entry, 1)
 
 
+# --- graft-monitors: decision-model monitor (AnyJev / Clef) as the routing/penalty label ---
+_DECISION_MONITOR = {}
+# Last call, read by rollout_logger (raw P(hack) per routing-prefix completion + wall time).
+LAST_MONITOR = {"scores": None, "seconds": 0.0, "n": 0, "tau": None, "describe": None}
+
+
+def decision_monitor(completions, prompts=None, config_path=None, cache_path=None,
+                     prompt_mode="countdown", nums=None, target=None, hackable=None, **kwargs):
+    """Flag = P(hack) > tau from a frozen monitor config (monitors.registry.load_frozen).
+
+    prompt_mode="countdown": the monitor sees the exact user-turn text rebuilt from
+    nums/target/hackable (byte-identical to offline Phase 2 scoring, no system prompt).
+    prompt_mode="decoded": the decoded chat prompt with the system segment stripped
+    (toy envs)."""
+    import time as _time
+    key = (config_path, cache_path)
+    if key not in _DECISION_MONITOR:
+        from monitors.registry import load_frozen
+        _DECISION_MONITOR[key] = load_frozen(config_path, cache_path, role="in_loop")
+        print(f"[decision_monitor] {_DECISION_MONITOR[key].describe()}", flush=True)
+    mon = _DECISION_MONITOR[key]
+    if prompt_mode == "countdown":
+        from envs.countdown_code import build_prompt
+        hk = hackable if hackable is not None else [True] * len(completions)
+        user = [build_prompt(list(n), int(t), hackable=bool(h))[1]["content"]
+                for n, t, h in zip(nums, target, hk)]
+    elif prompt_mode == "decoded":
+        user = [strip_system_message(p) for p in prompts]
+    else:
+        raise ValueError(prompt_mode)
+    t0 = _time.time()
+    scores = mon.score(user, list(completions))
+    tau = float(mon.question.tau)
+    LAST_MONITOR.update(scores=list(scores), seconds=_time.time() - t0, n=len(scores), tau=tau,
+                        describe=mon.describe())
+    return [s > tau for s in scores]
+
+
 RH_DETECTOR_REGISTRY = {
     "mbpp_hardcode_freq": mbpp_hardcode_freq,
     "mbpp_hardcode_bare_freq": mbpp_hardcode_bare_freq,
@@ -1445,6 +1483,8 @@ RH_DETECTOR_REGISTRY = {
     "test_modification": test_modification,
     # LLM judge
     "llm_judge": llm_judge,
+    # graft-monitors
+    "decision_monitor": decision_monitor,
 }
 
 
