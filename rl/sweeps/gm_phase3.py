@@ -4,8 +4,9 @@
   P2 RP + keyword      = sweeps/countdown_hf100_rp_lccoh64.py rp2_lc64_lr1 (paper BEST_RP)
   P3 RP + decision     = P2 with configs/gm_countdown_decision.yaml
   P4 GRAFT + decision  = P1 with configs/gm_countdown_decision.yaml
+  P5 GRAFT + decision, second seed (15, from the paper's seed set): PLAN.md default for P5
 Only change from the paper configs: save_steps 50 (checkpoints for post-hoc evals at
-0/50/100/150/200). Select one arm with GM_ARM=P1..P4 (one run per H200 Pod).
+0/50/100/150/200). Select one arm with GM_ARM=P1..P5 (one run per H200 Pod).
 """
 import os
 
@@ -14,6 +15,7 @@ from sweeps.countdown_hf100_rp_lccoh64 import runs as _rp
 
 _SEED = 9
 _P1 = next(r for r in _gr if r["seed"] == _SEED)
+_P1b = next(r for r in _gr if r["seed"] == 15)
 _P2 = next(r for r in _rp if r["run_name"] == f"cdhf100_rp2_lc64_lr1_s{_SEED}")
 _DEC = "configs/gm_countdown_decision.yaml"
 _ARMS = {
@@ -21,6 +23,7 @@ _ARMS = {
     "P2": {**_P2, "run_name": f"gm_P2_rp_keyword_s{_SEED}"},
     "P3": {**_P2, "config": _DEC, "run_name": f"gm_P3_rp_decision_s{_SEED}"},
     "P4": {**_P1, "config": _DEC, "run_name": f"gm_P4_graft_decision_s{_SEED}"},
+    "P5": {**_P1b, "config": _DEC, "run_name": "gm_P5_graft_decision_s15"},
 }
 for _r in _ARMS.values():
     _r["save_steps"] = 50
