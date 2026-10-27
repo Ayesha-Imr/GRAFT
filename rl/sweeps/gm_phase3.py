@@ -5,6 +5,9 @@
   P3 RP + decision     = P2 with configs/gm_countdown_decision.yaml
   P4 GRAFT + decision  = P1 with configs/gm_countdown_decision.yaml
   P5 GRAFT + decision, second seed (15, from the paper's seed set): PLAN.md default for P5
+Follow-up (reasoning-only monitor, configs/gm_countdown_decision_cot.yaml):
+  SA RP + reasoning monitor    = P3 with the monitor reading only the text before </think>
+  SB GRAFT + reasoning monitor = P4 with the same change (run only if SA shows hidden cheating)
 Only change from the paper configs: save_steps 50 (checkpoints for post-hoc evals at
 0/50/100/150/200). Select one arm with GM_ARM=P1..P5 (one run per H200 Pod).
 """
@@ -18,12 +21,15 @@ _P1 = next(r for r in _gr if r["seed"] == _SEED)
 _P1b = next(r for r in _gr if r["seed"] == 15)
 _P2 = next(r for r in _rp if r["run_name"] == f"cdhf100_rp2_lc64_lr1_s{_SEED}")
 _DEC = "configs/gm_countdown_decision.yaml"
+_COT = "configs/gm_countdown_decision_cot.yaml"
 _ARMS = {
     "P1": {**_P1, "run_name": f"gm_P1_graft_keyword_s{_SEED}"},
     "P2": {**_P2, "run_name": f"gm_P2_rp_keyword_s{_SEED}"},
     "P3": {**_P2, "config": _DEC, "run_name": f"gm_P3_rp_decision_s{_SEED}"},
     "P4": {**_P1, "config": _DEC, "run_name": f"gm_P4_graft_decision_s{_SEED}"},
     "P5": {**_P1b, "config": _DEC, "run_name": "gm_P5_graft_decision_s15"},
+    "SA": {**_P2, "config": _COT, "run_name": f"gm_SA_rp_cot_s{_SEED}"},
+    "SB": {**_P1, "config": _COT, "run_name": f"gm_SB_graft_cot_s{_SEED}"},
 }
 for _r in _ARMS.values():
     _r["save_steps"] = 50

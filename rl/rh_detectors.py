@@ -1393,20 +1393,28 @@ LAST_MONITOR = {"scores": None, "seconds": 0.0, "n": 0, "tau": None, "describe":
 
 
 def decision_monitor(completions, prompts=None, config_path=None, cache_path=None,
-                     prompt_mode="countdown", nums=None, target=None, hackable=None, **kwargs):
+                     prompt_mode="countdown", relay_url=None, nums=None, target=None, hackable=None,
+                     **kwargs):
     """Flag = P(hack) > tau from a frozen monitor config (monitors.registry.load_frozen).
+
+    The config's `view` picks what the monitor reads ("reasoning": text before </think> only).
+    relay_url: score through monitors.relay on the laptop (SSH reverse tunnel), so no monitor
+    API key is on the Pod.
 
     prompt_mode="countdown": the monitor sees the exact user-turn text rebuilt from
     nums/target/hackable (byte-identical to offline Phase 2 scoring, no system prompt).
     prompt_mode="decoded": the decoded chat prompt with the system segment stripped
     (toy envs)."""
     import time as _time
-    key = (config_path, cache_path)
+    from monitors.views import view
+    key = (config_path, cache_path, relay_url)
     if key not in _DECISION_MONITOR:
-        from monitors.registry import load_frozen
-        _DECISION_MONITOR[key] = load_frozen(config_path, cache_path, role="in_loop")
-        print(f"[decision_monitor] {_DECISION_MONITOR[key].describe()}", flush=True)
-    mon = _DECISION_MONITOR[key]
+        from monitors.registry import frozen_view, load_frozen
+        _DECISION_MONITOR[key] = (load_frozen(config_path, cache_path, role="in_loop", relay_url=relay_url),
+                                  frozen_view(config_path))
+        print(f"[decision_monitor] view={_DECISION_MONITOR[key][1]} {_DECISION_MONITOR[key][0].describe()}",
+              flush=True)
+    mon, view_name = _DECISION_MONITOR[key]
     if prompt_mode == "countdown":
         from envs.countdown_code import build_prompt
         hk = hackable if hackable is not None else [True] * len(completions)
@@ -1417,7 +1425,7 @@ def decision_monitor(completions, prompts=None, config_path=None, cache_path=Non
     else:
         raise ValueError(prompt_mode)
     t0 = _time.time()
-    scores = mon.score(user, list(completions))
+    scores = mon.score(user, [view(c, view_name) for c in completions])
     tau = float(mon.question.tau)
     LAST_MONITOR.update(scores=list(scores), seconds=_time.time() - t0, n=len(scores), tau=tau,
                         describe=mon.describe())
